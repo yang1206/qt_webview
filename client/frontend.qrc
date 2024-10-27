@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/">
+        <file>dist/index.html</file>
+        <file>dist/favicon.ico</file>
+        <file>dist/font/han_serif_light.json</file>
+        <file>dist/assets/AboutView-fjqlOzeH.js</file>
+        <file>dist/assets/AboutView-IRLiFF36.css</file>
+        <file>dist/assets/index-CPkcPwZu.css</file>
+        <file>dist/assets/index-oDmgEOBe.js</file>
+    </qresource>
+</RCC>
