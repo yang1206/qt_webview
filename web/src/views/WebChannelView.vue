@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { useQtBridge, useQtMessages } from '@/composables'
-import { NButton, NCard, NInput, NSpace, useMessage } from 'naive-ui'
+import { type Message, useQtBridge, useQtMessages } from '@/composables'
+import { useWebSocket } from '@vueuse/core'
+import { NButton, NCard, NInput, NRadioButton, NRadioGroup, NSpace, useMessage } from 'naive-ui'
 import { nextTick, ref, watch } from 'vue'
 
 const message = useMessage()
 const messageContent = ref('')
 
-const { bridge, isConnected, isReady } = useQtBridge({
-  objectName: 'bridge',
-  sendMethod: 'requestFromClient',
-  receiveSignal: 'responseFromServer',
-  messageSignal: 'messageFromServer',
-})
+const { bridge, isConnected, isReady } = useQtBridge()
 
 const { messages, sendMessage } = useQtMessages(bridge as any)
 
@@ -32,19 +28,63 @@ watch(() => messages.value.length, () => {
   scrollToBottom()
 })
 
+const { send: wsSend, status } = useWebSocket('ws://localhost:1086', {
+  autoReconnect: true,
+
+  onConnected() {
+    // console.log('WebSocket connected')
+  },
+
+  onDisconnected() {
+  },
+
+  onMessage(ws, event) {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.action === 'qt-message') {
+        const newMessage = {
+          content: data.data,
+          timestamp: Date.now(),
+          type: 'receive',
+          channel: 'websocket',
+        }
+        messages.value = [...messages.value as Message[], newMessage as Message]
+      }
+    }
+    catch (e: any) {
+      console.error('Received binary data', e)
+    }
+  },
+})
+
+// 添加发送方式选择
+const sendChannel = ref<'webchannel' | 'websocket'>('webchannel')
+
 async function handleSendMessage() {
   if (!messageContent.value.trim()) {
     message.warning('消息内容不能为空')
     return
   }
 
-  if (!isConnected.value || !isReady.value) {
+  if (sendChannel.value === 'webchannel' && (!isConnected.value || !isReady.value)) {
     message.error('Qt桥接尚未就绪')
     return
   }
 
+  if (sendChannel.value === 'websocket' && status.value !== 'OPEN') {
+    message.error('WebSocket 未连接')
+    return
+  }
+
   try {
-    await sendMessage(messageContent.value)
+    if (sendChannel.value === 'websocket') {
+      wsSend(JSON.stringify(messageContent.value))
+      await sendMessage(messageContent.value, 'websocket')
+    }
+    else {
+      await sendMessage(messageContent.value, 'webchannel')
+    }
+
     message.success('发送成功')
     messageContent.value = ''
   }
@@ -85,6 +125,7 @@ function formatTime(timestamp: number): string {
         >
           <div class="message-sender">
             {{ item.type === 'send' ? 'Web' : 'Qt' }}
+            ({{ item.channel }})
           </div>
           <div class="message-bubble">
             <div class="message-content">
@@ -100,17 +141,27 @@ function formatTime(timestamp: number): string {
 
     <div class="input-section">
       <NSpace vertical>
+        <NSpace>
+          <NRadioGroup v-model:value="sendChannel">
+            <NRadioButton value="webchannel">
+              WebChannel
+            </NRadioButton>
+            <NRadioButton value="websocket">
+              WebSocket
+            </NRadioButton>
+          </NRadioGroup>
+        </NSpace>
         <NInput
           v-model:value="messageContent"
           type="text"
           placeholder="请输入消息"
-          :disabled="!isReady"
+          :disabled="!isReady && sendChannel === 'webchannel'"
           @keyup.enter="handleSendMessage"
         />
         <NButton
           type="primary"
           block
-          :disabled="!isReady"
+          :disabled="!isReady && sendChannel === 'webchannel'"
           @click="handleSendMessage"
         >
           发送消息

@@ -31,6 +31,7 @@ QJsonObject Worker::processTask(const QJsonObject &task) {
     QJsonObject result;
     result["id"] = task["id"];
 
+
     if (action == "send-msg") {
         result["data"] = task["data"];
     } else if (action == "send-msg-sync") {

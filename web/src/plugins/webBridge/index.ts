@@ -1,4 +1,4 @@
-import type { BridgeMessage, BridgeOptions, BridgeResponse } from './bridge'
+import type { BridgeOptions } from './bridge'
 import QWebChannel from './qwebchannel/qwebchannel'
 
 export class QtBridge {
@@ -6,7 +6,7 @@ export class QtBridge {
   private qtObject: any = null
   private messageId = 0
   private callbacks = new Map<number, (response: BridgeResponse) => void>()
-  private eventListeners: Map<string, Array<(data: string) => void>> = new Map()
+  private eventListeners = new Map<string, Array<(data: any) => void>>()
 
   constructor(private options: BridgeOptions) {
     this.init()
@@ -15,8 +15,6 @@ export class QtBridge {
   private async init() {
     try {
       await this.waitForTransport()
-      // eslint-disable-next-line no-console
-      console.log('WebChannel transport ready')
 
       // eslint-disable-next-line no-new
       new QWebChannel(window.qt.webChannelTransport, (channel) => {
@@ -27,20 +25,36 @@ export class QtBridge {
           throw new Error(`Qt object "${this.options.objectName}" not found`)
         }
 
-        // 设置消息接收处理
-        this.qtObject[this.options.receiveSignal].connect((response: string) => {
-          this.handleResponse(response)
-        })
+        // 统一设置信号处理
+        Object.values(this.options.signals).forEach((signal) => {
+          this.qtObject[signal].connect((data: any) => {
+            const listeners = this.eventListeners.get(signal)
+            if (listeners) {
+              if (signal === this.options.signals.binary) {
+                try {
+                  // 解码 Base64 数据
+                  const binaryString = atob(data)
+                  const bytes = new Uint8Array(binaryString.length)
 
-        // 设置消息信号处理
-        if (this.options.messageSignal) {
-          this.qtObject[this.options.messageSignal].connect((message: string) => {
-            this.handleMessage(message)
+                  // 转换为字节数组
+                  for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i)
+                  }
+
+                  // 传递 ArrayBuffer 给监听器
+                  listeners.forEach(listener => listener(bytes.buffer))
+                }
+                catch (err) {
+                  console.error('Error processing binary data:', err)
+                  console.error('Data:', data)
+                }
+              }
+              else {
+                listeners.forEach(listener => listener(data))
+              }
+            }
           })
-        }
-
-        // eslint-disable-next-line no-console
-        console.log('QtBridge initialized successfully')
+        })
       })
     }
     catch (err) {
@@ -49,15 +63,15 @@ export class QtBridge {
     }
   }
 
-  private waitForTransport(): Promise<void> {
+  private async waitForTransport(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (window.qt?.webChannelTransport) {
         resolve()
         return
       }
 
-      let attempts = 0
-      const maxAttempts = 50
+      let retries = 0
+      const maxRetries = 50
       const interval = setInterval(() => {
         if (window.qt?.webChannelTransport) {
           clearInterval(interval)
@@ -65,52 +79,21 @@ export class QtBridge {
           return
         }
 
-        if (++attempts >= maxAttempts) {
+        if (++retries >= maxRetries) {
           clearInterval(interval)
-          reject(new Error('Timeout waiting for WebChannel transport'))
+          reject(new Error('Failed to find Qt WebChannel transport'))
         }
       }, 100)
     })
   }
 
-  public on(event: string, callback: (data: string) => void) {
-    // eslint-disable-next-line no-console
-    console.log('Adding listener for event:', event)
-    if (!this.eventListeners.has(event)) {
-      this.eventListeners.set(event, [])
-    }
-    this.eventListeners.get(event)?.push(callback)
-  }
-
-  public off(event: string, callback: (data: string) => void) {
-    // eslint-disable-next-line no-console
-    console.log('Removing listener for event:', event)
-    const listeners = this.eventListeners.get(event)
-    if (listeners) {
-      const index = listeners.indexOf(callback)
-      if (index !== -1) {
-        listeners.splice(index, 1)
-      }
-    }
-  }
-
-  private handleResponse(responseStr: string) {
-    // eslint-disable-next-line no-console
-    console.log('Handling response:', responseStr)
+  private handleResponse(response: string) {
     try {
-      const response = JSON.parse(responseStr)
-
-      // 处理回调
-      const callback = this.callbacks.get(response.id)
+      const data = JSON.parse(response)
+      const callback = this.callbacks.get(data.id)
       if (callback) {
-        callback(response)
-        this.callbacks.delete(response.id)
-      }
-
-      // 触发响应事件
-      const listeners = this.eventListeners.get(this.options.receiveSignal)
-      if (listeners) {
-        listeners.forEach(listener => listener(responseStr))
+        callback(data)
+        this.callbacks.delete(data.id)
       }
     }
     catch (err) {
@@ -118,39 +101,20 @@ export class QtBridge {
     }
   }
 
-  private handleMessage(messageStr: string) {
-    // eslint-disable-next-line no-console
-    console.log('Handling message:', messageStr)
-    try {
-      // 触发消息事件
-      const messageListeners = this.eventListeners.get(this.options.messageSignal!)
-      if (messageListeners) {
-        messageListeners.forEach(listener => listener(messageStr))
-      }
-    }
-    catch (err) {
-      console.error('Failed to handle message:', err)
-    }
-  }
+  public async send(request: BridgeRequest): Promise<BridgeResponse> {
+    if (!this.qtObject)
+      throw new Error('Bridge not initialized')
 
-  public send<T = any, R = any>(message: Omit<BridgeMessage<T>, 'id'>): Promise<R> {
+    const id = ++this.messageId
+    const message = {
+      ...request,
+      id,
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.qtObject) {
-        reject(new Error('Bridge not initialized'))
-        return
-      }
-
-      const id = ++this.messageId
-      const fullMessage: BridgeMessage<T> = {
-        id,
-        ...message,
-      }
-      // eslint-disable-next-line no-console
-      console.log('Sending message:', fullMessage)
-
-      this.callbacks.set(id, (response: BridgeResponse<R>) => {
+      this.callbacks.set(id, (response: BridgeResponse) => {
         if (response.success) {
-          resolve(response.data!)
+          resolve(response)
         }
         else {
           reject(new Error(response.error || 'Unknown error'))
@@ -158,7 +122,7 @@ export class QtBridge {
       })
 
       try {
-        this.qtObject[this.options.sendMethod](JSON.stringify(fullMessage))
+        this.qtObject[this.options.sendMethod](JSON.stringify(message))
       }
       catch (err) {
         this.callbacks.delete(id)
@@ -166,4 +130,41 @@ export class QtBridge {
       }
     })
   }
+
+  public on(signal: string, handler: (data: any) => void) {
+    if (!this.eventListeners.has(signal)) {
+      this.eventListeners.set(signal, [])
+    }
+    this.eventListeners.get(signal)?.push(handler)
+  }
+
+  public off(signal: string, handler: (data: any) => void) {
+    const listeners = this.eventListeners.get(signal)
+    if (listeners) {
+      const index = listeners.indexOf(handler)
+      if (index !== -1) {
+        listeners.splice(index, 1)
+      }
+    }
+  }
+
+  public dispose() {
+    this.callbacks.clear()
+    this.eventListeners.clear()
+  }
+}
+
+// 类型定义
+export interface BridgeRequest {
+  action: string
+  data?: any
+  id?: number
+  type?: string
+}
+
+export interface BridgeResponse {
+  id: number
+  success: boolean
+  data?: any
+  error?: string
 }

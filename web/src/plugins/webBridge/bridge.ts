@@ -5,18 +5,38 @@ export interface BridgeMessage<T = any> {
   data?: T // 消息数据
 }
 
+// 请求消息格式
+export interface BridgeRequest<T = any> extends Omit<BridgeMessage<T>, 'id'> {
+  id?: number
+}
+
 // 响应消息格式
-export interface BridgeResponse<T = any> {
-  id: number // 对应请求的ID
+export interface BridgeResponse<T = any> extends BridgeMessage<T> {
   success: boolean // 是否成功
-  data?: T // 响应数据
   error?: string // 错误信息
 }
 
-// Bridge配置选项
-export interface BridgeOptions {
-  objectName: string // Qt对象名称
-  sendMethod: string // 发送方法名
-  receiveSignal: string // 接收信号名
-  messageSignal?: string // 添加新的消息信号
-}
+// 事件监听器类型
+export type EventListener<T = any> = (data: T) => void
+
+// 定义固定的桥接配置
+export const BRIDGE_CONFIG = {
+  objectName: 'bridge',
+  sendMethod: 'requestFromClient',
+  signals: {
+    response: 'responseFromServer',
+    message: 'messageFromServer',
+    binary: 'binaryFromServer',
+  },
+  actions: {
+    webMessage: 'web-message',
+    qtMessage: 'qt-message',
+    toggleDataMode: 'toggle-data-mode',
+  },
+} as const
+
+// BridgeOptions 可以设为只读类型
+export type BridgeOptions = Readonly<typeof BRIDGE_CONFIG>
+
+// 二进制数据处理器类型
+export type BinaryDataHandler = (data: ArrayBuffer, type: string) => void

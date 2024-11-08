@@ -6,6 +6,7 @@ export interface Message {
   content: string
   timestamp: number
   type: 'send' | 'receive'
+  channel: 'webchannel' | 'websocket'
 }
 
 export function useQtMessages(bridgeRef: Ref<QtBridge | null>) {
@@ -25,6 +26,7 @@ export function useQtMessages(bridgeRef: Ref<QtBridge | null>) {
             content: data.data,
             timestamp: Date.now(),
             type: 'receive' as const,
+            channel: data.type || 'webchannel',
           }
           messages.value = [...messages.value, newMessage]
         }
@@ -43,6 +45,7 @@ export function useQtMessages(bridgeRef: Ref<QtBridge | null>) {
             content: data.data,
             timestamp: Date.now(),
             type: 'receive' as const,
+            channel: data.type || 'webchannel',
           }
           messages.value = [...messages.value, newMessage]
         }
@@ -64,8 +67,8 @@ export function useQtMessages(bridgeRef: Ref<QtBridge | null>) {
   })
 
   // 发送消息到 Qt
-  const sendMessage = async (content: string) => {
-    if (!bridgeRef.value) {
+  const sendMessage = async (content: string, channel: 'webchannel' | 'websocket' = 'webchannel') => {
+    if (!bridgeRef.value && channel === 'webchannel') {
       throw new Error('Bridge not initialized')
     }
 
@@ -74,15 +77,20 @@ export function useQtMessages(bridgeRef: Ref<QtBridge | null>) {
       content,
       timestamp: Date.now(),
       type: 'send' as const,
+      channel,
     }
     messages.value = [...messages.value, newMessage]
 
     // 然后发送消息
     try {
-      await bridgeRef.value.send({
-        action: 'web-message',
-        data: content,
-      })
+      if (channel === 'webchannel') {
+        await bridgeRef.value!.send({
+          action: 'web-message',
+          type: 'webchannel',
+          data: content,
+        })
+      }
+      // WebSocket 发送逻辑将在组件中处理
     }
     catch (err) {
       // 如果发送失败，从消息列表中移除该消息

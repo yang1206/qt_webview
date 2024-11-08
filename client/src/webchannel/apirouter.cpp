@@ -14,7 +14,6 @@ ApiRouter::ApiRouter(Worker *worker) {
 }
 
 void ApiRouter::requestFromClient(QString strParameter) {
-
     QJsonParseError json_error;
     QJsonDocument jsonDoc = QJsonDocument::fromJson(strParameter.toLocal8Bit().data(), &json_error);
 
@@ -24,22 +23,31 @@ void ApiRouter::requestFromClient(QString strParameter) {
     }
 
     QJsonObject jsonObj = jsonDoc.object();
+    int messageId = jsonObj["id"].toInt();
 
-    // 验证消息格式
     if (!jsonObj.contains("action")) {
         sendErrorResponse(-1, "Invalid message format");
         return;
     }
 
-    // 如果是普通消息
-    if (jsonObj["action"].toString() == "web-message") {
-        // 构造消息对象
+    QString action = jsonObj["action"].toString();
+
+    // 处理不同的动作类型
+    if (action == "web-message") {
         QJsonObject response;
+        response["id"] = messageId;
         response["action"] = "web-message";
         response["data"] = jsonObj["data"];
-
-        // 发送消息到Web端
         emit messageFromServer(QJsonDocument(response).toJson(QJsonDocument::Compact));
+        return;
+    } else if (action == "toggle-data-mode") {
+        // 处理数据模式切换
+        QJsonObject response;
+        response["id"] = messageId;
+        response["action"] = "toggle-data-mode";
+        response["success"] = true;
+        response["data"] = jsonObj["data"];
+        emit responseFromServer(QJsonDocument(response).toJson(QJsonDocument::Compact));
         return;
     }
 
@@ -82,4 +90,20 @@ void ApiRouter::sendErrorResponse(int id, const QString &error) {
 
     QString responseJson = QJsonDocument(response).toJson(QJsonDocument::Compact);
     emit responseFromServer(responseJson);
+}
+
+void ApiRouter::sendBinaryData(const QByteArray &data) {
+    if (data.isEmpty()) {
+        qWarning() << "Attempting to send empty binary data";
+        return;
+    }
+
+    // 确保数据是按字节对齐的
+    if (data.size() % sizeof(float) != 0) {
+        qWarning() << "Binary data size is not properly aligned!";
+        return;
+    }
+    QByteArray base64Data = data.toBase64();
+
+    emit binaryFromServer(QString::fromLatin1(base64Data));
 }

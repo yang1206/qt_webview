@@ -26,15 +26,20 @@ source_group("stamps" FILES ${STAMPS})
 set(CMAKE_AUTOUIC_SEARCH_PATHS ${PROJECT_SOURCE_DIR}/qt_ui)
 
 set(QT_SRC
-        qt_src/main.cpp
-        qt_src/mainwindow.cpp
-        qt_src/mainwindow.h
-        qt_src/worker.cpp
-        qt_src/worker.h
-        qt_src/apirouter.cpp
-        qt_src/apirouter.h
-        qt_src/devwindow.cpp
-        qt_src/devwindow.h
+        src/main.cpp
+        src/mainwindow.cpp
+        src/mainwindow.h
+        src/devwindow.cpp
+        src/devwindow.h
+        src/webData/prpd_generator.cpp
+        src/webData/prpd_generator.h
+        src/webchannel/worker.h
+        src/webchannel/worker.cpp
+        src/webchannel/apirouter.cpp
+        src/webchannel/apirouter.h
+        src/websocket/websocketserver.h
+        src/websocket/websocketserver.cpp
+
 )
 
 set(QT_UI
@@ -52,7 +57,7 @@ set(SRC
 )
 
 # include路径前缀
-include_directories(${PROJECT_SOURCE_DIR}/qt_src)
+include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
 # 收集依赖的qt库
@@ -61,6 +66,7 @@ set(QT_LIB
         Widgets
         Gui
         WebEngineWidgets
+        WebSockets
 )
 message(LOG ${CMAKE_PREFIX_PATH})
 find_package(Qt6 COMPONENTS REQUIRED
@@ -70,11 +76,11 @@ find_package(Qt6 COMPONENTS REQUIRED
 # 组合连接时的名字
 list(TRANSFORM QT_LIB PREPEND "Qt6::" OUTPUT_VARIABLE QT_LIB_LINK)
 
-foreach(item ${QT_LIB_LINK})
+foreach (item ${QT_LIB_LINK})
     get_target_property(LibLocation ${item} LOCATION)
     get_filename_component(LibDir ${LibLocation} DIRECTORY)
     list(APPEND LIB_LOCATION ${LibLocation})
-endforeach()
+endforeach ()
 
 add_executable(${PROJECT_NAME} ${SRC})
 

@@ -18,13 +18,20 @@ public:
     explicit ApiRouter(Worker *worker);
 
 public slots:
+    // JSON 方法
     void requestFromClient(QString strParameter);
     void sendMsgToClient(const QString &message);
+
+    // 二进制方法
+    void sendBinaryData(const QByteArray &data);
+
+
     void onTaskFinished(QJsonObject result);
 
 signals:
     void responseFromServer(QString response);
     void messageFromServer(QString message);
+    void binaryFromServer(QString data);
 
 private:
     void sendErrorResponse(int id, const QString &error);

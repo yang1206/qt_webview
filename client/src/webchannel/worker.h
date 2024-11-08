@@ -10,7 +10,6 @@
 #include <QMutex>
 #include <QObject>
 #include <QQueue>
-
 class Worker : public QObject {
     Q_OBJECT
 

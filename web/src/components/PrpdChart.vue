@@ -1,10 +1,11 @@
 <script lang="ts" setup>
-import { RGBmap } from './three/utils/color'
+import type { PRPDConfig } from './three/utils/prpd'
 import { breakpointsAntDesign, useBreakpoints, useDebounceFn } from '@vueuse/core'
-import { randomNormal, scaleLinear, scaleQuantile } from 'd3'
+import { scaleLinear, scaleQuantile } from 'd3'
 import * as THREE from 'three'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createAxis, createGrid, createSine, createTriangle } from './three/utils/axis'
+import { RGBmap } from './three/utils/color'
 import { type BreakPointsPresets, SizePresets } from './three/utils/resize'
 import RendererManager from './three/utils/three-renderer'
 
@@ -13,6 +14,8 @@ const props = withDefaults(defineProps<{
   height?: number
   autoresize?: boolean
   breackpoint?: BreakPointsPresets
+  data: any[] // 根据实际数据类型定义
+  config: PRPDConfig
 }>(), {
   width: SizePresets.get('xxl')?.[0],
   height: SizePresets.get('xxl')?.[1],
@@ -43,7 +46,7 @@ scene.add(cube)
 
 scene.background = new THREE.Color('white')
 
-// 创建网格
+// 创网格
 {
   const gridGeometry = createGrid(xVector.x, yVector.y, 20, 20)
   const grid = new THREE.LineSegments(
@@ -111,9 +114,6 @@ const phaseMax = 360 // 相位最大值
 const amplitudeMin = 0 // 幅值最小值
 const amplitudeMax = 50// 幅值最大值
 
-// 确认最大的放电次数
-const maxDischargeTimes = 10
-
 // 创建D3 scale函数
 const scaleX = scaleLinear()
   .domain([phaseMin, phaseMax])
@@ -127,78 +127,52 @@ const colorScale = scaleQuantile<string>()
   .domain([0, 1, 1])
   .range(RGBmap)
 
-function generatePoints(xVector: THREE.Vector3, yVector: THREE.Vector3, numPoints = 1000) {
-  const pointsMaterial = new THREE.PointsMaterial({
-    size: 5,
-    vertexColors: true, // 启用顶点颜色
-  })
+// 预分配数组以提高性能
+const positions = new Float32Array(props.config.pointsPerFrame! * 3)
+const colors = new Float32Array(props.config.pointsPerFrame! * 3)
+const color = new THREE.Color()
 
-  const pointsGeometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(numPoints * 3)
-  const colors = new Float32Array(numPoints * 3)
-  const color = new THREE.Color()
-  // 创建正态分布生成器
-  const phaseDistribution = randomNormal((phaseMax + phaseMin) / 2, (phaseMax - phaseMin) / 12)
-  const amplitudeDistribution = randomNormal((amplitudeMax + amplitudeMin) / 2, (amplitudeMax - amplitudeMin) / 12)
-  for (let i = 0; i < numPoints; i++) {
-    // 模拟数据
-    let phase = phaseDistribution()
-    let amplitude = amplitudeDistribution()
-    const times = Math.floor(Math.random() * maxDischargeTimes)
+// 创建点材质
+const pointsMaterial = new THREE.PointsMaterial({
+  size: 5,
+  vertexColors: true,
+  sizeAttenuation: false, // 添加这个确保点大小不会随距离变化
+})
 
-    // 确保生成的相位和幅值在指定范围内
-    phase = Math.max(phaseMin, Math.min(phaseMax, phase))
-    amplitude = Math.max(amplitudeMin, Math.min(amplitudeMax, amplitude))
+// 创建点几何体
+const pointsGeometry = new THREE.BufferGeometry()
+pointsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+pointsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
 
-    const x = scaleX(phase)
-    const y = scaleY(amplitude)
-
-    positions[i * 3] = x
-    positions[i * 3 + 1] = y
-    positions[i * 3 + 2] = 0
-
-    const intensity = times / maxDischargeTimes
-    const colorStr = colorScale(intensity)
-    color.set(colorStr)
-
-    colors[i * 3] = color.r
-    colors[i * 3 + 1] = color.g
-    colors[i * 3 + 2] = color.b
-  }
-
-  // 为每个散点加一个生命周期
-  // const life = Array(numPoints).fill(100)
-  pointsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  pointsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-  // pointsGeometry.setAttribute('life', new THREE.Float32BufferAttribute(life, 1))
-
-  return new THREE.Points(pointsGeometry, pointsMaterial)
-}
-// 使用散点函数
-const points = generatePoints(xVector, yVector)
+// 创建点对象
+const points = new THREE.Points(pointsGeometry, pointsMaterial)
 cube.add(points)
 
-function updatePointsGeometry(points: THREE.Points<THREE.BufferGeometry<THREE.NormalBufferAttributes>, THREE.PointsMaterial, THREE.Object3DEventMap>, numRemove: number, numPoints = 1000) {
-  const positions = points.geometry.getAttribute('position').array
-  const colors = points.geometry.getAttribute('color').array
-  const newPositions = new Float32Array(positions.length)
-  const newColors = new Float32Array(colors.length)
-  newPositions.set(positions.subarray(numRemove * 3))
-  newColors.set(colors.subarray(numRemove * 3))
+// 更新点的函数
+function updatePoints() {
+  props.data.forEach((point, index) => {
+    // 转换坐标
+    const x = scaleX(point.phase)
+    const y = scaleY(point.amplitude)
 
-  // 添加新点以保持点的总数
-  const newPoints = generatePoints(xVector, yVector, numPoints)
-  const newPositionsArray = newPoints.geometry.getAttribute('position').array as Float32Array
-  const newColorsArray = newPoints.geometry.getAttribute('color').array as Float32Array
+    positions[index * 3] = x
+    positions[index * 3 + 1] = y
+    positions[index * 3 + 2] = 0
 
-  newPositions.set(newPositionsArray, positions.length - newPositionsArray.length)
-  newColors.set(newColorsArray, colors.length - newColorsArray.length)
+    // 计算颜色
+    const intensity = point.count / props.config.maxCount
+    const colorStr = colorScale(intensity)
 
-  // 更新几何体的属性
-  points.geometry.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3))
-  points.geometry.setAttribute('color', new THREE.Float32BufferAttribute(newColors, 3))
+    color.set(colorStr)
 
-  // 标记需要更新
+    colors[index * 3] = color.r
+    colors[index * 3 + 1] = color.g
+    colors[index * 3 + 2] = color.b
+  })
+
+  // 更新缓冲区数据
+  ;(points.geometry.attributes.position as THREE.Float32BufferAttribute).copyArray(positions)
+  ;(points.geometry.attributes.color as THREE.Float32BufferAttribute).copyArray(colors)
   points.geometry.attributes.position.needsUpdate = true
   points.geometry.attributes.color.needsUpdate = true
 }
@@ -246,9 +220,8 @@ onMounted(() => {
     powerPreference: 'high-performance',
   }, props.width, props.height)
   rendererManager.addObject(cube)
-  setInterval(() => {
-    updatePointsGeometry(points, 1000)
-  }, 20)
+
+  // 启动动画循环
   rendererManager.animate()
 })
 
@@ -257,6 +230,10 @@ onBeforeUnmount(() => {
     rendererManager.destroy()
   }
 })
+
+watch(() => props.data, () => {
+  updatePoints()
+}, { deep: true, immediate: true })
 </script>
 
 <template>
